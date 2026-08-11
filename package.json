@@ -7,21 +7,59 @@
     "build": "next build",
     "start": "next start",
     "lint": "biome check",
-    "format": "biome format --write"
+    "format": "biome format --write",
+    "typecheck": "tsc --noEmit",
+    "images:manifest": "node --experimental-strip-types scripts/image-manifest.mts",
+    "images:products": "node --experimental-strip-types scripts/fetch-demo-images.mts",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:push": "prisma db push",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma migrate reset",
+    "admin:create": "tsx scripts/create-admin.mts",
+    "shop:reset": "node --experimental-strip-types scripts/reset-shop.mts",
+    "shop:restore": "node --experimental-strip-types scripts/restore-shop.mts",
+    "analyze": "next build --experimental-analyze",
+    "media:migrate": "node --experimental-strip-types scripts/migrate-media.mts"
   },
   "dependencies": {
-    "next": "16.2.12",
+    "@imagekit/next": "^2.1.5",
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/client": "7.9.1",
+    "better-auth": "1.6.25",
+    "clsx": "^2.1.1",
+    "embla-carousel-autoplay": "^8.6.0",
+    "embla-carousel-react": "^8.6.0",
+    "lucide-react": "^1.28.0",
+    "next": "16.3.0",
+    "pg": "^8.22.0",
+    "prisma": "7.9.1",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "server-only": "^0.0.1",
+    "tailwind-merge": "^3.6.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.20.4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
+    "dotenv": "^17.4.2",
     "tailwindcss": "^4",
+    "tsx": "^4.23.5",
     "typescript": "^5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "prisma",
+      "@prisma/client"
+    ]
   }
 }

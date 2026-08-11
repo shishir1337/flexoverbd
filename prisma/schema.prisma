@@ -1,0 +1,921 @@
+// FlexOver BD — data model
+//
+// Prisma 7: the `prisma-client` generator and an explicit `output` are both
+// required; the datasource URL lives in prisma.config.ts.
+//
+// Conventions used throughout:
+//   * Money is an Int of whole BDT (1090 = ৳1,090). Retail BDT has no practical
+//     subunit, and integers remove float drift from every total we compute.
+//   * Catalogue rows are soft-deleted via `archivedAt` — hard deletes would
+//     break order history and inbound links.
+//   * Anything an order needs to render is snapshotted onto the order line, so
+//     editing a product never rewrites the past.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Auth — Better Auth core models (+ the admin plugin's extra columns)
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String  @id
+  name          String
+  email         String  @unique
+  emailVerified Boolean @default(false)
+  image         String?
+
+  // admin plugin
+  role       String?   @default("customer") // owner | manager | staff | customer
+  banned     Boolean?  @default(false)
+  banReason  String?
+  banExpires DateTime?
+
+  // FlexOver additions
+  phone String? @unique
+
+  sessions  Session[]
+  accounts  Account[]
+  addresses Address[]
+  orders    Order[]
+  wishlist  WishlistItem[]
+  carts     Cart[]
+  auditLogs AdminAuditLog[]
+  uploads   MediaAsset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // admin plugin
+  impersonatedBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ---------------------------------------------------------------------------
+// Media
+// ---------------------------------------------------------------------------
+
+/// Images live on disk under public/ today. ImageKit is Phase 2 — when it
+/// lands, `imagekitId` is populated and `url` switches to the CDN. Everything
+/// downstream reads `url`, so the swap touches this table only.
+model MediaAsset {
+  id           String  @id @default(cuid())
+  imagekitId   String? @unique
+  url          String
+  thumbnailUrl String?
+  alt          String  @default("")
+  width        Int?
+  height       Int?
+  mimeType     String?
+  sizeBytes    Int?
+  folder       String?
+
+  /// Set while the asset is still a stand-in (e.g. "dummyjson:83"). Drives the
+  /// admin's "images still needing replacement" report.
+  demoSource String?
+
+  uploadedById String?
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id])
+
+  categories     Category[]
+  brands         Brand[]
+  productImages  ProductImage[]
+  bannersDesktop Banner[]           @relation("BannerDesktop")
+  bannersMobile  Banner[]           @relation("BannerMobile")
+  screenshots    ReviewScreenshot[]
+
+  createdAt DateTime @default(now())
+
+  @@index([folder])
+  @@index([demoSource])
+}
+
+// ---------------------------------------------------------------------------
+// Catalogue
+// ---------------------------------------------------------------------------
+
+model Brand {
+  id     String      @id @default(cuid())
+  slug   String      @unique
+  name   String
+  logoId String?
+  logo   MediaAsset? @relation(fields: [logoId], references: [id])
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Category {
+  id        String @id @default(cuid())
+  slug      String @unique
+  name      String
+  /// Compact label for the circular scroller under the header.
+  shortName String
+  blurb     String
+  /// Tailwind class pair used for the placeholder tint and chip.
+  tint      String
+
+  imageId String?
+  image   MediaAsset? @relation(fields: [imageId], references: [id])
+
+  position Int     @default(0)
+  isActive Boolean @default(true)
+
+  seoTitle       String?
+  seoDescription String?
+
+  subcategories Subcategory[]
+  products      Product[]
+
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([isActive, position])
+}
+
+model Subcategory {
+  id         String   @id @default(cuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  slug       String
+  name       String
+  position   Int      @default(0)
+  isActive   Boolean  @default(true)
+
+  products Product[]
+
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([categoryId, slug])
+  @@index([categoryId, isActive, position])
+}
+
+enum ProductBadge {
+  NEW
+  BESTSELLER
+  LIMITED
+  RESTOCK
+}
+
+model Product {
+  id    String @id @default(cuid())
+  slug  String @unique
+  title String
+
+  brandId String?
+  brand   Brand?  @relation(fields: [brandId], references: [id])
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  subcategoryId String?
+  subcategory   Subcategory? @relation(fields: [subcategoryId], references: [id])
+
+  /// Null falls back to the category copy template, exactly as the frontend
+  /// does today via productDescription().
+  description String?
+  /// Optional overrides for the derived bullets / spec table.
+  highlights  Json?
+  specs       Json?
+
+  price     Int
+  compareAt Int?
+
+  badge        ProductBadge?
+  freeDelivery Boolean       @default(false)
+  tags         String[]
+
+  /// Denormalised aggregates. Recomputed when reviews are approved and when
+  /// orders are placed — reading them happens on every listing page, so they
+  /// cannot be a join.
+  ratingAvg   Decimal @default(0) @db.Decimal(2, 1)
+  reviewCount Int     @default(0)
+  soldCount   Int     @default(0)
+
+  isActive    Boolean   @default(true)
+  publishedAt DateTime?
+
+  seoTitle       String?
+  seoDescription String?
+
+  variants      ProductVariant[]
+  images        ProductImage[]
+  reviews       Review[]
+  flashItems    FlashSaleItem[]
+  orderItems    OrderItem[]
+  wishlistItems WishlistItem[]
+
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([categoryId, isActive])
+  @@index([subcategoryId, isActive])
+  @@index([isActive, publishedAt])
+  @@index([isActive, price])
+  @@index([isActive, ratingAvg])
+  @@index([isActive, soldCount])
+}
+
+enum SizeSystem {
+  APPAREL
+  FOOTWEAR
+  ONESIZE
+}
+
+/// One row per sellable combination. Even a product with no choices gets
+/// exactly one variant, so stock, SKU and pricing have a single code path.
+///
+/// The frontend rule "an option with one value is metadata, not a choice"
+/// still holds: if every variant shares one colourName, no picker renders —
+/// but the colour still reaches the packing slip.
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  sku String @unique
+
+  colourName String?
+  colourHex  String?
+  sizeValue  String?
+  sizeLabel  String?
+  sizeSystem SizeSystem?
+
+  /// Null inherits Product.price. Present so a 3XL can cost more without
+  /// splitting the product in two.
+  priceOverride Int?
+  stock         Int     @default(0)
+  isActive      Boolean @default(true)
+  position      Int     @default(0)
+
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  movements  StockMovement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, colourName, sizeValue])
+  @@index([productId, isActive])
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  mediaId String
+  media   MediaAsset @relation(fields: [mediaId], references: [id])
+
+  alt        String  @default("")
+  position   Int     @default(0)
+  /// Pins an image to a colourway so the gallery can follow the selection.
+  colourName String?
+
+  @@index([productId, position])
+}
+
+// ---------------------------------------------------------------------------
+// Flash sales
+// ---------------------------------------------------------------------------
+
+model FlashSaleCampaign {
+  id       String   @id @default(cuid())
+  name     String
+  startsAt DateTime
+  endsAt   DateTime
+  isActive Boolean  @default(true)
+
+  items FlashSaleItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, startsAt, endsAt])
+}
+
+model FlashSaleItem {
+  id         String            @id @default(cuid())
+  campaignId String
+  campaign   FlashSaleCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  salePrice Int
+  /// Units offered at the sale price; drives the "% claimed" bar.
+  stockCap  Int?
+  claimed   Int  @default(0)
+
+  @@unique([campaignId, productId])
+}
+
+// ---------------------------------------------------------------------------
+// Geography & delivery
+// ---------------------------------------------------------------------------
+
+model Division {
+  id   String @id @default(cuid())
+  name String @unique
+
+  districts District[]
+}
+
+model DeliveryZone {
+  id       String @id @default(cuid())
+  name     String @unique
+  fee      Int
+  etaLabel String
+  position Int    @default(0)
+
+  districts District[]
+}
+
+model District {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  divisionId  String
+  division    Division     @relation(fields: [divisionId], references: [id])
+  zoneId      String
+  zone        DeliveryZone @relation(fields: [zoneId], references: [id])
+  /// Per-district exception; null inherits the zone fee.
+  feeOverride Int?
+  isActive    Boolean      @default(true)
+
+  addresses Address[]
+  orders    Order[]
+
+  @@index([zoneId])
+}
+
+// ---------------------------------------------------------------------------
+// Customers
+// ---------------------------------------------------------------------------
+
+model Address {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  label      String?
+  fullName   String
+  phone      String
+  districtId String
+  district   District @relation(fields: [districtId], references: [id])
+  area       String
+  line1      String
+  landmark   String?
+  isDefault  Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Cart — server-side so it survives device changes and can be recovered
+// ---------------------------------------------------------------------------
+
+model Cart {
+  id         String  @id @default(cuid())
+  userId     String?
+  user       User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// httpOnly cookie value for anonymous carts. Merged into the user cart on
+  /// login (sum quantities, cap at stock).
+  guestToken String? @unique
+
+  items CartItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model CartItem {
+  id        String         @id @default(cuid())
+  cartId    String
+  cart      Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  qty       Int            @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One line per variant — the rule the storefront already enforces.
+  @@unique([cartId, variantId])
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+enum OrderStatus {
+  PLACED
+  CONFIRMED
+  PACKED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURNED
+}
+
+enum PaymentMethod {
+  COD
+  BKASH
+  NAGAD
+  ROCKET
+  CARD
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model Order {
+  id     String @id @default(cuid())
+  number String @unique
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  // Contact + address are snapshotted: guests have no user row, and a customer
+  // editing their address later must not rewrite a shipped order.
+  customerName  String
+  customerPhone String
+  customerEmail String?
+
+  districtId String
+  district   District @relation(fields: [districtId], references: [id])
+  area       String
+  line1      String
+  landmark   String?
+  notes      String?
+
+  status        OrderStatus   @default(PLACED)
+  paymentMethod PaymentMethod @default(COD)
+  paymentStatus PaymentStatus @default(PENDING)
+
+  subtotal    Int
+  deliveryFee Int
+  discount    Int @default(0)
+  total       Int
+
+  couponId String?
+  coupon   Coupon? @relation(fields: [couponId], references: [id])
+
+  /// Which courier is carrying it, and their reference. Both set when the
+  /// order is marked shipped; a COD store's support calls are almost all
+  /// "where is it", and the answer lives with the courier, not with us.
+  courier        String?
+  trackingNumber String?
+
+  items       OrderItem[]
+  events      OrderEvent[]
+  redemptions CouponRedemption[]
+
+  placedAt    DateTime  @default(now())
+  confirmedAt DateTime?
+  shippedAt   DateTime?
+  deliveredAt DateTime?
+  cancelledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, placedAt])
+  @@index([customerPhone])
+  @@index([userId, placedAt])
+}
+
+model OrderItem {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Live references for reporting and re-order; nullable so an archived
+  // product never blocks reading an old order.
+  productId String?
+  product   Product?        @relation(fields: [productId], references: [id])
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
+
+  // Snapshots — the order renders correctly forever.
+  titleSnapshot    String
+  variantLabel     String?
+  skuSnapshot      String?
+  priceSnapshot    Int
+  imageUrlSnapshot String?
+  qty              Int
+  lineTotal        Int
+
+  @@index([orderId])
+}
+
+/// Replaces the frontend's derivedStatus() — status is now a fact written by
+/// staff, not a function of elapsed time.
+model OrderEvent {
+  id                String      @id @default(cuid())
+  orderId           String
+  order             Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status            OrderStatus
+  note              String?
+  /// Internal notes stay out of the customer-facing tracking timeline.
+  isCustomerVisible Boolean     @default(true)
+  createdById       String?
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+enum StockReason {
+  ORDER
+  CANCEL
+  RETURN
+  MANUAL_ADJUST
+  RESTOCK
+  CORRECTION
+}
+
+/// ProductVariant.stock is the running total; this ledger explains it. Both are
+/// written inside the same transaction, so they can never disagree.
+model StockMovement {
+  id          String         @id @default(cuid())
+  variantId   String
+  variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  delta       Int
+  reason      StockReason
+  orderId     String?
+  note        String?
+  createdById String?
+
+  createdAt DateTime @default(now())
+
+  @@index([variantId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Marketing
+// ---------------------------------------------------------------------------
+
+enum CouponType {
+  PERCENT
+  FIXED
+  FREE_DELIVERY
+}
+
+model Coupon {
+  id           String     @id @default(cuid())
+  code         String     @unique
+  type         CouponType
+  value        Int
+  minSubtotal  Int?
+  maxDiscount  Int?
+  usageLimit   Int?
+  perUserLimit Int?       @default(1)
+  usedCount    Int        @default(0)
+  startsAt     DateTime?
+  endsAt       DateTime?
+  isActive     Boolean    @default(true)
+
+  orders      Order[]
+  redemptions CouponRedemption[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CouponRedemption {
+  id       String  @id @default(cuid())
+  couponId String
+  coupon   Coupon  @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId   String?
+  /// Guests have no user id; the phone is what caps per-customer usage.
+  phone    String?
+  orderId  String
+  order    Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount   Int
+
+  createdAt DateTime @default(now())
+
+  @@index([couponId, userId])
+  @@index([couponId, phone])
+}
+
+model NewsletterSubscriber {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  isSubscribed Boolean @default(true)
+  source       String?
+
+  createdAt DateTime @default(now())
+}
+
+model WishlistItem {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+}
+
+// ---------------------------------------------------------------------------
+// Content & configuration — everything the admin can change
+// ---------------------------------------------------------------------------
+
+/// One row per logical settings group ("site", "contact", "social",
+/// "commerce", "seo", "theme") so editing contact details cannot clobber
+/// commerce rules.
+model Setting {
+  key   String @id
+  value Json
+
+  updatedAt DateTime @updatedAt
+}
+
+enum BannerPlacement {
+  HERO
+  PROMO_TILE
+  WIDE
+}
+
+enum BannerTone {
+  LIGHT
+  DARK
+  /// No scrim and no enforced copy colour — the artwork carries itself.
+  /// For image-only banners, where a wash would only dull the photograph.
+  NONE
+}
+
+model Banner {
+  id        String          @id @default(cuid())
+  placement BannerPlacement
+
+  eyebrow  String?
+  title    String
+  subtitle String?
+  cta      String?
+  href     String?
+
+  /// Chosen from how pale the *photograph* is, never from the app theme —
+  /// a light photo needs ink copy on a light scrim.
+  tone BannerTone @default(LIGHT)
+
+  imageDesktopId String?
+  imageDesktop   MediaAsset? @relation("BannerDesktop", fields: [imageDesktopId], references: [id])
+  imageMobileId  String?
+  imageMobile    MediaAsset? @relation("BannerMobile", fields: [imageMobileId], references: [id])
+
+  position Int       @default(0)
+  isActive Boolean   @default(true)
+  startsAt DateTime?
+  endsAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([placement, isActive, position])
+}
+
+model Announcement {
+  id       String    @id @default(cuid())
+  text     String
+  position Int       @default(0)
+  isActive Boolean   @default(true)
+  startsAt DateTime?
+  endsAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, position])
+}
+
+model TrendingSearch {
+  id       String  @id @default(cuid())
+  term     String  @unique
+  position Int     @default(0)
+  isActive Boolean @default(true)
+
+  /// How many times shoppers have actually searched this.
+  ///
+  /// The list used to be entirely hand-written, which meant it showed what
+  /// staff *guessed* people wanted rather than what they typed. Recording the
+  /// real thing lets the list keep itself current.
+  hits Int @default(0)
+
+  /// When it was last searched. Trending is scoped to a recent window, so a
+  /// term that was huge last winter stops crowding out this week's.
+  lastSeenAt DateTime?
+
+  /// Pinned terms always show, whatever the numbers say — for a campaign the
+  /// shop wants surfaced before anyone has searched for it yet.
+  isPinned Boolean @default(false)
+
+  @@index([isActive, hits])
+}
+
+model TrustItem {
+  id       String  @id @default(cuid())
+  /// lucide-react icon name.
+  icon     String
+  title    String
+  subtitle String?
+  position Int     @default(0)
+  isActive Boolean @default(true)
+}
+
+enum NavGroup {
+  FOOTER_HELP
+  FOOTER_COMPANY
+  MOBILE_SHORTCUT
+  MOBILE_HELP
+}
+
+model NavLink {
+  id       String   @id @default(cuid())
+  group    NavGroup
+  label    String
+  href     String
+  icon     String?
+  position Int      @default(0)
+  isActive Boolean  @default(true)
+
+  @@index([group, isActive, position])
+}
+
+/// CMS pages: about, privacy, terms, shipping, refund-policy, contact.
+model Page {
+  id    String @id @default(cuid())
+  slug  String @unique
+  title String
+
+  seoTitle       String?
+  seoDescription String?
+
+  /// [{ type: 'heading' | 'paragraph' | 'list' | 'callout' | 'table', ... }]
+  blocks Json
+
+  isPublished Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FaqItem {
+  id       String  @id @default(cuid())
+  question String
+  answer   String
+  group    String?
+  position Int     @default(0)
+  isActive Boolean @default(true)
+  ctaLabel String?
+  ctaHref  String?
+
+  @@index([isActive, position])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Set when the review is tied to a real order — drives "verified purchase".
+  orderId   String?
+
+  authorName String
+  location   String?
+  rating     Int
+  body       String
+
+  isApproved Boolean @default(false)
+  isVerified Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId, isApproved])
+}
+
+/// The auto-scrolling screenshot wall on the homepage.
+model ReviewScreenshot {
+  id      String     @id @default(cuid())
+  mediaId String
+  media   MediaAsset @relation(fields: [mediaId], references: [id])
+
+  caption  String?
+  column   Int     @default(0)
+  position Int     @default(0)
+  isActive Boolean @default(false)
+
+  /// Publishing is blocked until this is true. The current caption claims
+  /// permission from the people in the screenshots that has not been obtained.
+  consentObtained Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, column, position])
+}
+
+/// Slugs are permanent. Renaming records the old value here and the proxy
+/// serves a 301, so a rename never costs the ranking.
+model SlugHistory {
+  id      String @id @default(cuid())
+  entity  String
+  oldSlug String
+  newSlug String
+
+  createdAt DateTime @default(now())
+
+  @@unique([entity, oldSlug])
+}
+
+model AdminAuditLog {
+  id        String  @id @default(cuid())
+  userId    String?
+  user      User?   @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  before    Json?
+  after     Json?
+  ip        String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([userId, createdAt])
+}

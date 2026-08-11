@@ -1,26 +1,425 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ==========================================================================
+   FlexOver BD — Design Tokens
+   Light theme. Brand primary #ff8e02.
+   Mobile-first: every value below is tuned for 360–430px screens first.
+   ========================================================================== */
+
+@theme {
+  /* --- Brand ramp -------------------------------------------------------
+     500 is the brand color. Use 500/600 for fills, 700 for orange *text*
+     on white (#B35A00 hits 4.67:1 — WCAG AA). Never use 500 for body text. */
+  --color-brand-50: #fff6e9;
+  --color-brand-100: #ffeacb;
+  --color-brand-200: #ffd79b;
+  --color-brand-300: #ffbe63;
+  --color-brand-400: #ffa52f;
+  --color-brand-500: #ff8e02;
+  --color-brand-600: #e67700;
+  --color-brand-700: #b35a00;
+  --color-brand-800: #8a4600;
+  --color-brand-900: #6b3600;
+
+  /* --- Ink (text) — all AA+ on white --------------------------------- */
+  --color-ink: #14171f; /* 16.1:1 — headings, prices  */
+  --color-ink-2: #4a5162; /*  8.0:1 — body             */
+  --color-ink-3: #767e8f; /*  4.6:1 — meta, captions   */
+  --color-ink-4: #a3a9b7; /*  icons/dividers only      */
+
+  /* --- Surfaces ------------------------------------------------------- */
+  --color-surface: #ffffff;
+  --color-surface-2: #f7f8fa;
+  --color-surface-3: #f1f2f5;
+  --color-surface-dark: #14171f;
+  --color-line: #e7e9ee;
+  --color-line-strong: #d7dae2;
+
+  /* Always-dark regardless of theme: scrims, overlays, the announcement bar. */
+  --color-scrim: #14171f;
+
+  /* Semantic aliases onto the brand ramp. They exist so a theme switch is a
+     token change rather than a find-and-replace across 100+ components. */
+  --color-brand-on: #b35a00; /* orange *text* on a light surface — 4.67:1 */
+  --color-brand-soft: #fff6e9; /* subtle brand wash behind icons/chips */
+
+  /* --- Semantic ------------------------------------------------------- */
+  --color-success: #0e9f6e;
+  --color-success-soft: #e7f7f1;
+  --color-danger: #e02424;
+  --color-danger-soft: #fdecec;
+  --color-gold: #ffb400;
+  --color-info: #1f6feb;
+
+  /* --- Type -----------------------------------------------------------
+     Inter's latin subset contains no U+09F3 (৳), so without help the Taka sign
+     lands on whatever face the browser happens to pick first — which renders
+     it undersized and misaligned against the digits beside it. Naming
+     Bengali-capable system faces explicitly fixes that for every visitor at
+     zero download cost: Noto Sans Bengali ships on Android, Kohinoor Bengali
+     on iOS, Nirmala UI on Windows. They only ever serve glyphs Inter lacks. */
+  --font-bengali:
+    "Noto Sans Bengali", "Kohinoor Bengali", "Nirmala UI", "Shonar Bangla",
+    Vrinda;
+  --font-sans:
+    var(--font-inter), var(--font-bengali), ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display:
+    var(--font-jakarta), var(--font-inter), var(--font-bengali), ui-sans-serif,
+    system-ui, sans-serif;
+
+  --text-2xs: 0.6875rem; /* 11px — badges only */
+  --text-2xs--line-height: 1rem;
+
+  /* --- Radii ---------------------------------------------------------- */
+  --radius-card: 1rem;
+  --radius-btn: 0.75rem;
+  --radius-chip: 999px;
+
+  /* --- Elevation (soft, light-theme appropriate) ---------------------- */
+  --shadow-card:
+    0 1px 2px rgb(20 23 31 / 0.04), 0 4px 16px rgb(20 23 31 / 0.06);
+  --shadow-card-hover:
+    0 2px 4px rgb(20 23 31 / 0.05), 0 12px 28px rgb(20 23 31 / 0.1);
+  --shadow-pop: 0 8px 30px rgb(20 23 31 / 0.14);
+  /* Admin panels. Barely there on purpose — enough to lift a white card off
+     the grey page without the storefront's marketing-weight elevation, which
+     on a screen holding eight cards reads as clutter. */
+  --shadow-xs: 0 1px 2px rgb(20 23 31 / 0.05);
+  --shadow-brand: 0 6px 18px rgb(255 142 2 / 0.3);
+
+  /* --- Motion — one rhythm for the whole product ---------------------- */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-soft: cubic-bezier(0.55, 0, 0.55, 0.2);
+
+  /* --- Layered z-index scale ------------------------------------------ */
+  --z-sticky: 30;
+  --z-header: 40;
+  --z-fab: 50;
+  --z-bottomnav: 60;
+  --z-scrim: 70;
+  --z-drawer: 80;
+  --z-toast: 90;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+/* ==========================================================================
+   Base
+   ========================================================================== */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+    /* Kill iOS rubber-band on the page while keeping rails scrollable */
+    overscroll-behavior-y: none;
+  }
+
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.5;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* 16px minimum stops iOS Safari from auto-zooming on focus */
+  input,
+  select,
+  textarea {
+    font-size: max(1rem, 16px);
+    font-family: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Prices, counters and timers must not reflow as digits change */
+  .tnum,
+  time,
+  [data-price] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: var(--color-brand-200);
+    color: var(--color-ink);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ==========================================================================
+   Utilities
+   ========================================================================== */
+
+/* Horizontal product/category rails — native momentum scrolling, zero JS.
+
+   One variable drives the gutter, the scroll padding and the negative margin
+   together, and they must agree. `scroll-snap-align: start` aligns an item to
+   the scrollport inset by scroll-padding — so if scroll-padding is smaller
+   than padding-inline, the browser scrolls the difference on load and clips
+   the first card. Deriving all three from `--rail-pad` makes that
+   impossible; set the value via the `pad` prop on <Rail>. */
+@utility rail {
+  --rail-pad: 1rem;
+  display: flex;
+  margin-inline: calc(var(--rail-pad) * -1);
+  padding-inline: var(--rail-pad);
+  scroll-padding-inline: var(--rail-pad);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+@utility rail-item {
+  scroll-snap-align: start;
+  flex: none;
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Reduces accidental 300ms tap delay and double-tap zoom on controls */
+@utility tap {
+  touch-action: manipulation;
+}
+
+/*
+ * A 44px touch target on a control that is drawn smaller.
+ *
+ * The admin's dense rows use 32px icon buttons — right for a mouse, a coin
+ * flip for a thumb, and the rows they sit in are the ones staff use on a phone
+ * while packing. The invisible pad only appears for coarse pointers, so desktop
+ * density is untouched and neighbouring buttons do not start overlapping.
+ */
+@utility hit-touch {
+  position: relative;
+
+  @media (pointer: coarse) {
+    &::after {
+      content: "";
+      position: absolute;
+      inset: 50% 50%;
+      width: 44px;
+      height: 44px;
+      translate: -50% -50%;
+    }
+  }
+}
+
+/* Safe-area helpers for fixed bottom chrome (iPhone gesture bar) */
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@utility mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Consistent page gutters across every section */
+@utility container-page {
+  width: 100%;
+  margin-inline: auto;
+  max-width: 90rem; /* 1440px */
+  padding-inline: 1rem;
+  @media (width >= 40rem) {
+    padding-inline: 1.5rem;
+  }
+  @media (width >= 64rem) {
+    padding-inline: 2rem;
+  }
+}
+
+/* Clamp product titles to 2 lines and reserve the space, so a short title
+   and a long one produce identically tall cards (no grid jitter). */
+@utility clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+@utility clamp-1 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+}
+
+/* Skeleton shimmer — neutralised by the reduced-motion block below */
+@utility shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--color-surface-3);
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(255 255 255 / 0.65) 50%,
+      transparent 100%
+    );
+    animation: shimmer 1.4s infinite;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Announcement rotator: each message fades up as it replaces the last. */
+@keyframes announce-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Testimonial wall: each column holds its items twice, so translating by
+   exactly -50% lands on an identical frame and the loop is seamless. */
+@keyframes scroll-y-up {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+
+@keyframes scroll-y-down {
+  from {
+    transform: translateY(-50%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@utility scroll-col-up {
+  animation: scroll-y-up var(--scroll-duration, 40s) linear infinite;
+  will-change: transform;
+}
+
+@utility scroll-col-down {
+  animation: scroll-y-down var(--scroll-duration, 40s) linear infinite;
+  will-change: transform;
+}
+
+/* Fades the top and bottom edges so cards dissolve rather than being sliced
+   off by the container — the thing that makes an auto-scroller look designed
+   instead of clipped. */
+@utility mask-fade-y {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 12%,
+    #000 88%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 12%,
+    #000 88%,
+    transparent 100%
+  );
+}
+
+/* Admin toasts and the confirm dialog. Rises from below on a phone, where the
+   stack sits at the bottom of the screen, and reads as a slide-in on desktop
+   where it sits bottom-right. One keyframe covers both. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility animate-announce-in {
+  animation: announce-in 0.4s var(--ease-out-soft) both;
+}
+
+/* Dismissed for the session. Set by the inline script in AnnouncementBar
+   before first paint, and by the close button afterwards. */
+:root.announcement-off #announcement-bar {
+  display: none;
+}
+
+@utility animate-fade-up {
+  animation: fade-up 0.35s var(--ease-out-soft) both;
+}
+
+/* ==========================================================================
+   Accessibility: motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  /* biome-ignore-start lint/complexity/noImportantStyles: this is the standard
+     reduced-motion kill switch — it has to beat every utility and inline
+     animation in the app, including Tailwind's, so !important is required. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* biome-ignore-end lint/complexity/noImportantStyles: end of kill switch */
 }

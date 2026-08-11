@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Prisma generated client (regenerated via `prisma generate`)
+/src/generated
+
+# Secrets
+.env
+.env.local
